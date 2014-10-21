@@ -1,0 +1,212 @@
+#!/usr/bin/perl
+
+#
+# Copyright (C) 2014 Opsmate, Inc.
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+# OTHER DEALINGS IN THE SOFTWARE.
+# 
+# Except as contained in this notice, the name(s) of the above copyright
+# holders shall not be used in advertising or otherwise to promote the
+# sale, use or other dealings in this Software without prior written
+# authorization.
+#
+
+use strict;
+use warnings;
+use Getopt::Long;
+use IPC::Run3;
+use LWPx::ParanoidAgent;
+use FindBin;
+
+our $VERSION = '0.001';
+our $USAGE = "Usage: $0 [-c|--ca-file CAFILE]\n";
+
+Getopt::Long::Configure(qw(no_ignore_case permute bundling));
+my $glop = {};
+if (!GetOptions($glop, 'ca-file|c=s', 'help|h', 'version|V') || @ARGV != 0) {
+	print STDERR $USAGE;
+	exit 2;
+}
+
+if ($glop->{help}) {
+	print $USAGE;
+	exit 0;
+}
+if ($glop->{version}) {
+	print "$0 version $VERSION\n";
+	exit 0;
+}
+
+our @chains;
+our $CA_FILE = $glop->{'ca-file'} || "$FindBin::Bin/../data/browser_roots.pem";
+
+my $ua = LWPx::ParanoidAgent->new();
+$ua->timeout(15);
+
+sub deduce_cert_type {
+	my ($content_type, $uri) = @_;
+
+	return 'crt' if $content_type eq 'application/pkix-cert' ||
+			$content_type eq 'application/x-x509-ca-cert' ||
+			$content_type eq 'application/x509-ca-cert';
+
+	return 'p7c' if $content_type eq 'application/x-pkcs7-certificates' ||
+			$content_type eq 'application/pkcs7-certificates';
+
+
+	return 'crt' if $uri =~ /\.(crt|cer)$/;
+	return 'p7c' if $uri =~ /\.(p7c)$/;
+
+	return undef;
+}
+
+sub extract_pkcs7_certs {
+	my ($content) = @_;
+
+	my @certs;
+	my $current_cert;
+
+	# Pipe it through `openssl pkcs7 -inform der -outform pem -print_certs`, parse out CERTIFICATE blocks and return each one in a list
+	my $eat_line = sub {
+		my ($line) = @_;
+
+		chomp $line;
+		if (not($current_cert) && $line eq '-----BEGIN CERTIFICATE-----') {
+			my $cert = '';
+			$current_cert = \$cert;
+		}
+			
+		if ($current_cert) {
+			$$current_cert .= "$line\n";
+			if ($line eq '-----END CERTIFICATE-----') {
+				push @certs, $current_cert;
+				$current_cert = undef;
+			}
+		}
+	};
+
+	my $err = '';
+	run3([ 'openssl', 'pkcs7', '-inform', 'der', '-outform', 'pem', '-print_certs' ], $content, $eat_line, \$err);
+	warn "Failed to extract certs from PKCS7 file: $err" if $? != 0;
+
+	return @certs;
+}
+
+sub download {
+	my ($uri) = @_;
+
+	# Fetch the URI
+	my $response = $ua->get($uri);
+	if (!$response->is_success) {
+		warn "Failed to fetch $uri: " . $response->status_line;
+		return ();
+	}
+
+	my $content = $response->decoded_content();
+	my $type = deduce_cert_type($response->header('Content-Type') || '', $uri);
+	unless ($type) {
+		warn "Unable to deduce type of $uri: assuming it's a standard DER-encoded cert";
+		$type = 'crt';
+	}
+
+	my @certs;
+
+	if ($type eq 'crt') {
+		# Pipe it through `openssl x509 -inform der -outform pem`, and return it in single-element list
+		my $out = '';
+		my $err = '';
+		run3([ 'openssl', 'x509', '-inform', 'der', '-outform', 'pem' ], \$content, \$out, \$err);
+		if ($? == 0) {
+			push @certs, \$out;
+		} else {
+			warn "Unable to convert downloaded cert from DER to PEM: $err";
+		}
+
+	} elsif ($type eq 'p7c') {
+		push @certs, extract_pkcs7_certs(\$content);
+	}
+
+	return @certs;
+}
+
+sub is_trusted {
+	my ($cert) = @_;
+	my $out = '';
+	my $err = '';
+	run3([ 'openssl', 'verify', '-CApath', '/nonexistent', '-CAfile', $CA_FILE ], $cert, \$out, \$err);
+	return $? == 0;
+}
+
+sub get_ca_issuer_uris {
+	my ($cert) = @_;
+	my @uris;
+
+	my $eat_line = sub {
+		my ($line) = @_;
+
+		chomp $line;
+		if ($line =~ /^\s*CA Issuers - URI:(.*)$/) {
+			push @uris, $1;
+		}
+	};
+
+	my $err = '';
+	run3([ 'openssl', 'x509', '-noout', '-text' ], $cert, $eat_line, \$err);
+	warn "Failed to get issuer URIs from cert: $err" if $? != 0;
+
+	return @uris;
+}
+
+sub process {
+	my ($chain) = @_;
+
+	my $last_cert = $chain->[@$chain - 1];
+
+	if (is_trusted($last_cert)) {
+		push @chains, $chain;
+		return;
+	}
+
+	for my $uri (get_ca_issuer_uris($last_cert)) {
+		for my $cert (download($uri)) {
+			process([ @$chain, $cert ]);
+		}
+	}
+}
+
+unless (-f $CA_FILE) {
+	print STDERR "$CA_FILE: No such file\n";
+	print STDERR "Please specify the path to the certificate bundle with the --ca-file option\n" unless $glop->{'ca-file'};
+	exit 3;
+}
+
+my $cert = do { local $/; <STDIN> };
+process([ \$cert ]);
+
+if (@chains == 0) {
+	print STDERR "Unable to find a chain for this certificate.\n";
+	exit 1;
+}
+
+@chains = sort { @$a <=> @$b } @chains;
+my @best_chain = @{$chains[0]};
+shift @best_chain;
+for my $cert (@best_chain) {
+	print $$cert;
+}

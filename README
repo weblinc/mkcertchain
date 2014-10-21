@@ -1,0 +1,15 @@
+mkcertchain is a utility for building a chain of intermediate certificates
+for an SSL certificate.  It downloads the chain certificate from the URL
+specified in the certificate's "CA Issuers" field, recurring until
+encountering a root certificate that's trusted in all major browsers.
+If multiple certificate chains are found, the shortest one is used.
+
+Usage: mkcertchain [--ca-file=PATH] < CERTIFICATE
+
+mkcertchain reads the certificate from standard in and outputs the
+chain to standard out.
+
+Use --ca-file to specify the path to the file containing root certificate
+authorities trusted by browsers.  If unspecified, this option defaults
+to ../data/browser_roots.pem, relative to the directory containing the
+mkcertchain program.
