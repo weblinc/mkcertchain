@@ -211,3 +211,57 @@ shift @best_chain;
 for my $cert (@best_chain) {
 	print $$cert;
 }
+
+__END__
+
+=head1 NAME
+
+mkcertchain - build the intermediate certificate chain for an SSL certificate
+
+=head1 SYNOPSIS
+
+ mkcertchain [--ca-file=PATH] < CERTIFICATE
+
+=head1 DESCRIPTION
+
+B<mkcertchain> is a utility for building a chain of intermediate certificates
+for an SSL certificate.  It downloads the chain certificate from the URL
+specified in the certificate's "CA Issuers" field, recurring until
+encountering a root certificate that's trusted in all major browsers.
+If multiple certificate chains are found, the shortest one is used.
+
+mkcertchain reads the certificate from standard in and outputs the
+chain to standard out.
+
+mkcertchain was developed by SSLMate L<https://sslmate.com> and powers
+the chain cert generator on L<https://whatsmychaincert.com>.  SSLMate is
+an SSL certificate management service that lets you buy SSL certificates
+from the command line.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-c> I<path>, B<--ca-file>=I<path>
+
+Specify the path to the file containing root certificate authorities trusted by browsers.
+mkcertchain stops building the chain when it encounters a certificate which has been signed
+by one of the certificates in this file.  If unspecified, this option defaults
+to ../data/browser_roots.pem, relative to the directory containing the
+mkcertchain program.
+
+=item B<-h>, B<--help>
+
+Display this help message.
+
+=item B<-V>, B<--version>
+
+Print only the version string and then quit.
+
+=back
+
+=head1 COPYRIGHT
+
+Copyright (C) 2014 Opsmate, Inc.
+
+=cut

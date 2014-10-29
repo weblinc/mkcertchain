@@ -13,3 +13,8 @@ Use --ca-file to specify the path to the file containing root certificate
 authorities trusted by browsers.  If unspecified, this option defaults
 to ../data/browser_roots.pem, relative to the directory containing the
 mkcertchain program.
+
+mkcertchain was developed by SSLMate <https://sslmate.com> and powers
+the chain cert generator on <https://whatsmychaincert.com>.  SSLMate is
+an SSL certificate management service that lets you buy SSL certificates
+from the command line.
