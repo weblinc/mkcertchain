@@ -9,6 +9,7 @@ VERSION = 0.1.0
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
+DATADIR ?= $(PREFIX)/share/mkcertchain
 DOCDIR ?= $(PREFIX)/share/doc/mkcertchain
 MANDIR ?= $(PREFIX)/share/man
 DISTDIR ?= $(PROJECT)-$(VERSION)
@@ -39,11 +40,15 @@ clean-man:
 #
 # Install
 #
-install: install-bin install-doc install-man
+install: install-bin install-data install-doc install-man
 
 install-bin:
 	mkdir -m 755 -p $(DESTDIR)$(BINDIR)
 	install -m 755 bin/mkcertchain $(DESTDIR)$(BINDIR)/
+
+install-data:
+	mkdir -m 755 -p $(DESTDIR)$(DATADIR)
+	install -m 644 share/mkcertchain/browser_roots.pem $(DESTDIR)$(DATADIR)/
 
 install-doc:
 	mkdir -m 755 -p $(DESTDIR)$(DOCDIR)
@@ -61,10 +66,14 @@ install-paths:
 #
 # Uninstall
 #
-uninstall: uninstall-bin uninstall-doc uninstall-man
+uninstall: uninstall-bin uninstall-data uninstall-doc uninstall-man
 
 uninstall-bin:
 	rm -f $(DESTDIR)$(BINDIR)/mkcertchain
+
+uninstall-data:
+	rm -f $(DESTDIR)$(DATADIR)/browser_roots.pem
+	rmdir --ignore-fail-on-non-empty $(DESTDIR)$(DATADIR)
 
 uninstall-doc:
 	rm -f $(DESTDIR)$(DOCDIR)/README
