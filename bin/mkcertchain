@@ -27,6 +27,7 @@
 # authorization.
 #
 
+use 5.010;	# 5.10
 use strict;
 use warnings;
 use Getopt::Long;
@@ -54,7 +55,7 @@ if ($glop->{version}) {
 }
 
 our @chains;
-our $CA_FILE = $glop->{'ca-file'} || "$FindBin::Bin/../data/browser_roots.pem";
+our $CA_FILE = $glop->{'ca-file'} // "$FindBin::Bin/../data/browser_roots.pem";
 
 my $ua = LWPx::ParanoidAgent->new();
 $ua->timeout(15);
@@ -119,7 +120,7 @@ sub download {
 	}
 
 	my $content = $response->decoded_content();
-	my $type = deduce_cert_type($response->header('Content-Type') || '', $uri);
+	my $type = deduce_cert_type($response->header('Content-Type') // '', $uri);
 	unless ($type) {
 		warn "Unable to deduce type of $uri: assuming it's a standard DER-encoded cert";
 		$type = 'crt';
