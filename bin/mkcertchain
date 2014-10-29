@@ -35,7 +35,7 @@ use IPC::Run3;
 use LWPx::ParanoidAgent;
 use FindBin;
 
-our $VERSION = '0.001';
+use version; our $VERSION = version->declare('0.1.0');
 our $USAGE = "Usage: $0 [-c|--ca-file CAFILE]\n";
 
 Getopt::Long::Configure(qw(no_ignore_case permute bundling));
